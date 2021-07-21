@@ -15,12 +15,6 @@ char buf_arr[9];
 // incoming byte
 char m;
 
-// byte index in read buffer
-int ri;
-
-// byte index in write buffer
-int wi;
-
 // termination character
 char TERMCHAR = 0x0A;
 
@@ -49,8 +43,9 @@ IPAddress no_client(0, 0, 0, 0);
 
 
 void setup() {
+  // keep checking for DHCP address until its available
   while (Ethernet.begin(mac) == 0) {
-    delay(1); // keep checking for ethernet connection until its available
+    delay(1);
   }
 
   // start listening for clients
@@ -74,7 +69,7 @@ void loop() {
   // if the client connection has bytes to read, read them and take action 
   if (client) {
     // read incoming bytes into the buffer
-    ri = 0;
+    int i = 0;
     t0 = now();
     while (true) {
       // check error conditions on read
@@ -82,7 +77,7 @@ void loop() {
         ret = "ERROR: read timeout";
         break;
       }
-      else if (ri > 8) {
+      else if (i > 8) {
         ret = "ERROR: invalid message";
         break;
       }
@@ -93,8 +88,8 @@ void loop() {
         // end of message reached
         break;  
       }
-      buf_arr[ri] = m;
-      ri++;
+      buf_arr[i] = m;
+      i++;
     }
 
     if (ret == "") {
