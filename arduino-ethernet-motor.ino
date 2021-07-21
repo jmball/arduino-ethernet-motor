@@ -1,17 +1,15 @@
 /* 
-  Echo back messages to a client.
+  Control Arduino motor shield with commands over ethernet.
 */
 
 #include <SPI.h>
 #include <Ethernet.h>
 #include <TimeLib.h>
 
-// TODO: add error messages
-
 // MAC address
 byte mac[] = {0xA8, 0x61, 0x0A, 0xAE, 0x89, 0x87};
 
-// buffer
+// read buffer
 char buf_arr[9];
 
 // incoming byte
@@ -29,16 +27,26 @@ char TERMCHAR = 0x0A;
 // comms timeout in seconds
 int timeout = 15;
 time_t t0;
-int t;
 
-// motor speed
-int motor_speed = 35;
+// return message
+String ret = String("");
+  
+// default motor speed (max 255)
+int motor_speed = 50;
 
-// define port
+// motor state variables
+String on = String("off");
+String dir = String("fwd");
+
+// identity sring
+char idn[60] = "arduino-ethernet-motor_a0ae5240-afba-4c40-b3c8-2b1e218a88c9";
+
+// define ethernet port
 EthernetServer server = EthernetServer(30001);
 
 // null IP address
 IPAddress no_client(0, 0, 0, 0);
+
 
 void setup() {
   // Open serial communications and wait for port to open:
@@ -57,7 +65,7 @@ void setup() {
       Serial.println("Ethernet cable is not connected.");
     }
 
-    // no point in carrying on, so do nothing forevermore:
+    // no point in carrying on, so do nothing forevermore
     while (true) {
       delay(1);
     }
@@ -71,18 +79,18 @@ void setup() {
   server.begin();
 
   // setup motor on channel A
-  pinMode(12, OUTPUT);    // channel A direction pin
-  pinMode(9, OUTPUT);     // channel A brake pin
-  digitalWrite(12, HIGH); // set direction to forward
-  digitalWrite(9, HIGH);  // turn on brake to start with
-  analogWrite(3, motor_speed);     // set speed to 25 (max 255)
+  pinMode(12, OUTPUT);         // channel A direction pin
+  pinMode(9, OUTPUT);          // channel A brake pin
+  digitalWrite(12, HIGH);      // set direction to forward
+  digitalWrite(9, HIGH);       // turn on brake to start with
+  analogWrite(3, motor_speed); // set speed to default
 }
 
 void loop() {
   // maintain an IP lease from the DHCP server
   Ethernet.maintain();
 
-  // if an incoming client connects, there will be bytes available to read:
+  // check for an incoming client connection with bytes available to read
   EthernetClient client = server.available();
 
   if (client.remoteIP() != no_client) {
@@ -90,63 +98,112 @@ void loop() {
     Serial.println(client.remoteIP());
   }
   
-  // read bytes from the incoming client and write them back
-  // to any clients connected to the server: 
+  // if the client connection has bytes to read, read them and take action 
   if (client) {
     // read incoming bytes into the buffer
     ri = 0;
     t0 = now();
-    t = 0;
-    // TODO: Check for invalid string length
-    while (t < timeout) {
+    while (true) {
+      // check error conditions on read
+      if ((now() - t0) > timeout) {
+        ret = "ERROR: read timeout";
+        break;
+      }
+      else if (ri > 8) {
+        ret = "ERROR: invalid message";
+        break;
+      }
+
+      // read a byte into the buffer
       m = client.read();
       if (m == TERMCHAR){
+        // end of message reached
         break;  
       }
       buf_arr[ri] = m;
       ri++;
-      t = now() - t0;
     }
 
     // convert buffer to string
-    // buf_arr[ri + 1] = '\0';
     String cmd = String(buf_arr);
     
     // print message
     Serial.print("Msg: ");
     Serial.println(cmd);
-        
-    // write bytes back to all clients
-    for (wi = 0; wi <= ri; wi++) {
-      server.write(buf_arr[wi]);
-    server.write(TERMCHAR);
+
+    if (ret == "") {
+      // set motor parameters according to command
+      if (cmd == "start") {
+        digitalWrite(9, LOW);
+      }
+      else if (cmd == "stop") {
+        digitalWrite(9, HIGH);
+      }
+      else if (cmd == "fwd") {
+        digitalWrite(12, HIGH);
+      }
+      else if (cmd == "rev") {
+        digitalWrite(12, LOW);
+      }
+      else if (cmd.startsWith("speed")) {
+        // read motor speed from cmd and convert to int
+        motor_speed = cmd.substring(5).toInt();
+        if (motor_speed > 255) {
+          ret = "ERROR: invalid motor speed";
+        }
+        else {
+          analogWrite(3, motor_speed);
+        }
+      }
+      else if (cmd == "status") {
+        // check brake for on/off state
+        if (digitalRead(9) == 1) {
+          on = "off";
+        }
+        else {
+          on = "on";
+        }
+  
+        // check direction
+        if (digitalRead(12) == 1) {
+          dir = "fwd";
+        }
+        else {
+          dir = "rev";
+        }
+  
+        // build return string
+        ret = on + "," + dir + "," + motor_speed;
+      }
+      else if (cmd == "idn") {
+        ret = idn;
+      }
+      else {
+        ret = "ERROR: invalid message";
+      }
+    }
+    else {
+      // print read error
+      Serial.println(ret);
     }
 
-    // set motor parameters
-    // TODO: add status command
-    if (cmd == "start") {
-      digitalWrite(9, LOW);
-    }
-    else if (cmd == "stop") {
-      digitalWrite(9, HIGH);
-    }
-    else if (cmd == "fwd") {
-      digitalWrite(12, HIGH);
-    }
-    else if (cmd == "rev") {
-      digitalWrite(12, LOW);
-    }
-    else if (cmd.startsWith("speed")) {
-      motor_speed = cmd.substring(5).toInt();
-      analogWrite(3, motor_speed);
-    }
+    // create write buffer (server.write needs char array not String) from 
+    // return message and send back to all clients
+    int wbuf_len = ret.length() + 1; 
+    char wbuf[wbuf_len];
+    ret.toCharArray(wbuf, wbuf_len);
+    server.write(wbuf);
+    server.write(TERMCHAR);
 
     // close the client connection
     client.stop();
 
-    // reset buffer
+    // reset read buffer
     for (int i = 0; i < 9; i++) {
       buf_arr[i] = '\0';
     }
+
+    // reset return msg
+    ret = "";
   }
 }
