@@ -49,31 +49,9 @@ IPAddress no_client(0, 0, 0, 0);
 
 
 void setup() {
-  // Open serial communications and wait for port to open:
-  Serial.begin(9600);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
+  while (Ethernet.begin(mac) == 0) {
+    delay(1); // keep checking for ethernet connection until its available
   }
-  
-  // start the Ethernet connection, acquiring an IP from a DHCP server
-  Serial.println("Initialize Ethernet with DHCP:");
-  if (Ethernet.begin(mac) == 0) {
-    Serial.println("Failed to configure Ethernet using DHCP");
-    if (Ethernet.hardwareStatus() == EthernetNoHardware) {
-      Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
-    } else if (Ethernet.linkStatus() == LinkOFF) {
-      Serial.println("Ethernet cable is not connected.");
-    }
-
-    // no point in carrying on, so do nothing forevermore
-    while (true) {
-      delay(1);
-    }
-  }
-
-  // print your local IP address:
-  Serial.print("My IP address: ");
-  Serial.println(Ethernet.localIP());
 
   // start listening for clients
   server.begin();
@@ -92,11 +70,6 @@ void loop() {
 
   // check for an incoming client connection with bytes available to read
   EthernetClient client = server.available();
-
-  if (client.remoteIP() != no_client) {
-    Serial.print("New client IP address: ");
-    Serial.println(client.remoteIP());
-  }
   
   // if the client connection has bytes to read, read them and take action 
   if (client) {
@@ -124,14 +97,10 @@ void loop() {
       ri++;
     }
 
-    // convert buffer to string
-    String cmd = String(buf_arr);
-    
-    // print message
-    Serial.print("Msg: ");
-    Serial.println(cmd);
-
     if (ret == "") {
+      // convert buffer to string
+      String cmd = String(buf_arr);
+      
       // set motor parameters according to command
       if (cmd == "start") {
         digitalWrite(9, LOW);
@@ -181,10 +150,6 @@ void loop() {
       else {
         ret = "ERROR: invalid message";
       }
-    }
-    else {
-      // print read error
-      Serial.println(ret);
     }
 
     // create write buffer (server.write needs char array not String) from 
